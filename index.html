@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Finance Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body { font-family: Arial; background:#f3f4f6; margin:0; padding:20px }
+    body.dark { background:#111; color:white }
+
+    .top-bar { display:flex; justify-content:space-between; align-items:center }
+
+    .cards {
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px,1fr));
+      gap:15px;
+      margin:20px 0
+    }
+
+    .card {
+      background:white;
+      padding:15px;
+      border-radius:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.08)
+    }
+
+    body.dark .card { background:#1e1e1e }
+
+    canvas { max-height:300px; margin-bottom:20px }
+
+    input, select, button {
+      padding:8px; margin:5px;
+      border-radius:6px; border:1px solid #ccc
+    }
+
+    button { background:#2563eb; color:white; cursor:pointer }
+
+    table { width:100%; background:white; border-radius:12px; margin-top:20px }
+    body.dark table { background:#1e1e1e }
+
+    th, td { padding:10px }
+  </style>
+</head>
+
+<body>
+
+<div class="top-bar">
+  <h1>Finance Dashboard</h1>
+  <div>
+    <select id="role">
+      <option value="viewer">Viewer</option>
+      <option value="admin">Admin</option>
+    </select>
+    <button onclick="toggleDark()">🌙</button>
+    <button onclick="exportCSV()">Export</button>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card">Balance: ₹ <span id="balance"></span></div>
+  <div class="card">Income: ₹ <span id="income"></span></div>
+  <div class="card">Expense: ₹ <span id="expense"></span></div>
+</div>
+
+<canvas id="lineChart"></canvas>
+<canvas id="pieChart"></canvas>
+
+<input type="text" id="search" placeholder="Search category">
+
+<select id="filter">
+  <option value="all">All</option>
+  <option value="income">Income</option>
+  <option value="expense">Expense</option>
+</select>
+
+<select id="sort">
+  <option value="none">Sort</option>
+  <option value="amount">Sort by Amount</option>
+</select>
+
+<button id="addBtn">Add</button>
+
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Amount</th>
+      <th>Category</th>
+      <th>Type</th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+
+<div class="card">
+  <h3>Insights</h3>
+  <p id="insight"></p>
+</div>
+
+<script>
+
+let transactions = JSON.parse(localStorage.getItem("tx")) || [
+  { id:1, date:"2026-03-01", amount:4000, category:"Salary", type:"income" },
+  { id:2, date:"2026-04-01", amount:5000, category:"Salary", type:"income" },
+  { id:3, date:"2026-04-02", amount:1200, category:"Food", type:"expense" },
+  { id:4, date:"2026-04-03", amount:800, category:"Transport", type:"expense" }
+];
+
+const tableBody = document.getElementById("tableBody");
+const roleEl = document.getElementById("role");
+const searchEl = document.getElementById("search");
+const filterEl = document.getElementById("filter");
+const sortEl = document.getElementById("sort");
+
+let lineChart, pieChart;
+
+function render(){
+
+  let income = 0, expense = 0;
+
+  // ✅ Correct total calculation
+  transactions.forEach(t=>{
+    let amt = Number(t.amount) || 0;
+    if(t.type==="income") income += amt;
+    else expense += amt;
+  });
+
+  document.getElementById("balance").innerText = income - expense;
+  document.getElementById("income").innerText = income;
+  document.getElementById("expense").innerText = expense;
+
+  tableBody.innerHTML = "";
+
+  let filtered = transactions.filter(t =>
+    (filterEl.value==='all' || t.type===filterEl.value) &&
+    t.category.toLowerCase().includes(searchEl.value.toLowerCase())
+  );
+
+  if(sortEl.value==='amount'){
+    filtered.sort((a,b)=>b.amount-a.amount);
+  }
+
+  // ✅ Table render FIXED
+  filtered.forEach(t=>{
+    tableBody.innerHTML += `
+      <tr>
+        <td>${t.date}</td>
+        <td>₹ ${t.amount}</td>
+        <td>${t.category}</td>
+        <td>${t.type}</td>
+        <td>
+          ${roleEl.value==='admin' ? `
+            <button onclick="editTx(${t.id})">Edit</button>
+            <button onclick="deleteTx(${t.id})">Delete</button>
+          ` : `<span style="color:gray">View Only</span>`}
+        </td>
+      </tr>
+    `;
+  });
+
+  if(filtered.length===0){
+    tableBody.innerHTML = "<tr><td colspan='5'>No data available</td></tr>";
+  }
+
+  // ✅ Line Chart
+  if(lineChart) lineChart.destroy();
+  lineChart = new Chart(document.getElementById("lineChart"),{
+    type:"line",
+    data:{
+      labels: transactions.map(t=>t.date),
+      datasets:[{
+        label:"Amount",
+        data: transactions.map(t=>Number(t.amount)||0)
+      }]
+    }
+  });
+
+  // ✅ Pie Chart
+  let cat={};
+  transactions.forEach(t=>{
+    if(t.type==='expense'){
+      cat[t.category] = (cat[t.category]||0) + (Number(t.amount)||0);
+    }
+  });
+
+  if(pieChart) pieChart.destroy();
+  pieChart = new Chart(document.getElementById("pieChart"),{
+    type:"pie",
+    data:{
+      labels:Object.keys(cat),
+      datasets:[{ data:Object.values(cat) }]
+    }
+  });
+
+  // ✅ Insights FIXED
+  let highest = Object.keys(cat).length
+    ? Object.keys(cat).reduce((a,b)=>cat[a]>cat[b]?a:b)
+    : "None";
+
+  let prev = transactions
+    .filter(t=>t.date.includes("2026-03"))
+    .reduce((a,b)=>a+(Number(b.amount)||0),0);
+
+  let curr = transactions
+    .filter(t=>t.date.includes("2026-04"))
+    .reduce((a,b)=>a+(Number(b.amount)||0),0);
+
+  let change = prev ? (((curr-prev)/prev)*100).toFixed(1) : 0;
+
+  document.getElementById("insight").innerText =
+    `Top Category: ${highest} | Monthly Change: ${change}%`;
+
+  document.getElementById("addBtn").style.display =
+    roleEl.value==='admin' ? 'inline-block':'none';
+
+  localStorage.setItem("tx", JSON.stringify(transactions));
+}
+
+function deleteTx(id){
+  transactions = transactions.filter(t=>t.id!==id);
+  render();
+}
+
+function editTx(id){
+  let tx = transactions.find(t=>t.id===id);
+  let val = prompt("Enter amount", tx.amount);
+  tx.amount = Number(val) || 0;
+  render();
+}
+
+function toggleDark(){
+  document.body.classList.toggle("dark");
+}
+
+function exportCSV(){
+  let csv="date,amount,category,type\n";
+  transactions.forEach(t=>{
+    csv+=`${t.date},${t.amount},${t.category},${t.type}\n`;
+  });
+  let blob=new Blob([csv]);
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="data.csv";
+  a.click();
+}
+
+document.getElementById("addBtn").onclick=()=>{
+  let amt = prompt("Enter amount", "1000");
+  let type = prompt("Type (income/expense)", "expense");
+  let category = prompt("Category", "Misc");
+
+  transactions.push({
+    id: Date.now(),
+    date: new Date().toISOString().split('T')[0],
+    amount: Number(amt) || 0,
+    category: category || "Misc",
+    type: type==="income" ? "income" : "expense"
+  });
+
+  render();
+};
+
+searchEl.oninput = render;
+filterEl.onchange = render;
+sortEl.onchange = render;
+roleEl.onchange = render;
+
+render();
+
+</script>
+
+</body>
+</html>
