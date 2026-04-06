@@ -90,4 +90,4 @@ It allows users to track their financial activity, view transactions, and unders
 ---
 
 ## 👨‍💻 Author
-Your Name
+Anushka Jain
